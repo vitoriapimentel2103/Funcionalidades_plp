@@ -1,0 +1,59 @@
+{-# LANGUAGE OverloadedStrings #-}
+
+import Database.ODBC
+import Control.Exception
+
+data Carro = Carro
+    { marca :: String
+    , modelo :: String
+    , ano :: Int
+    } deriving (Show)
+
+-- Função para listar carros por categoria
+listarCarrosPorCategoria :: ODBCConnection -> String -> IO ()
+listarCarrosPorCategoria conn categoria = do
+    let query = "SELECT marca, modelo, ano FROM Carros WHERE categoria = ?"
+    result <- withTransaction conn $ \transConn -> do
+        prepareStmt transConn query
+        executeStmt transConn [toSql categoria]
+        fetchAllRows transConn
+
+    case result of
+        Left err -> putStrLn $ "Erro ao listar carros: " ++ show err
+        Right rows -> if null rows
+            then putStrLn $ "Não há carros disponíveis na categoria '" ++ categoria ++ "'"
+            else do
+                putStrLn $ "Carros disponíveis na categoria '" ++ categoria ++ "':"
+                mapM_ printCarro rows
+
+printCarro :: [SqlValue] -> IO ()
+printCarro [marcaSql, modeloSql, anoSql] = do
+    let marca = fromSql marcaSql
+        modelo = fromSql modeloSql
+        ano = fromSql anoSql :: Int
+    putStrLn $ "Marca: " ++ marca ++ ", Modelo: " ++ modelo ++ ", Ano: " ++ show ano
+printCarro _ = putStrLn "Dados do carro inválidos"
+
+main :: IO ()
+main = do
+    let connStr = "DSN=SWI-Prolog;Database=plp_app;Server=localhost;Uid=postgres;Pwd=plp123;Port=5433"
+    conn <- odbcConnect connStr
+
+    putStrLn "Bem-vindo à Locadora de Carros!"
+    putStrLn "Opções de Categoria:"
+    putStrLn "1. Econômico"
+    putStrLn "2. Intermediário"
+    putStrLn "3. SUV"
+    putStrLn "4. Luxo"
+
+    putStrLn "Escolha a categoria de carro desejada (1/2/3/4): "
+    categoria <- getLine
+
+    case categoria of
+        "1" -> listarCarrosPorCategoria conn "Econômico"
+        "2" -> listarCarrosPorCategoria conn "Intermediário"
+        "3" -> listarCarrosPorCategoria conn "SUV"
+        "4" -> listarCarrosPorCategoria conn "Luxo"
+        _   -> putStrLn "Opção inválida. Por favor, escolha uma categoria válida."
+
+    odbcDisconnect conn `catch` (\(SomeException e) -> putStrLn $ "Erro ao desconectar: " ++ show e)

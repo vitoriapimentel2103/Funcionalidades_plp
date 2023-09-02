@@ -1,0 +1,96 @@
+{-# LANGUAGE OverloadedStrings #-}
+
+import Database.ODBC
+import Control.Exception
+
+data DashboardInfo = DashboardInfo
+    { receitaTotal :: Double
+    , numeroAlugueis :: Int
+    , totalCarros :: Int
+    , carrosMaisDefeituosos :: [(String, Int)]
+    , alugueisPorCategoria :: [(String, Int)]
+    } deriving (Show)
+
+data MenuOption = ReceitaTotal | NumeroAlugueis | TotalCarros | CarrosMaisDefeituosos | AlugueisPorCategoria | Sair
+    deriving (Eq)
+
+-- Função para obter informações do Dashboard
+obterInformacoesDashboard :: ODBCConnection -> IO DashboardInfo
+obterInformacoesDashboard conn = do
+    let queryReceitaTotal = "SELECT SUM(valor_total) FROM Aluguéis"
+    let queryNumeroAlugueis = "SELECT COUNT(*) FROM Aluguéis"
+    let queryTotalCarros = "SELECT COUNT(*) FROM Carros"
+    let queryCarrosMaisDefeituosos = "SELECT modelo, COUNT(*) FROM Carros GROUP BY modelo ORDER BY COUNT(*) DESC LIMIT 5"
+    let queryAlugueisPorCategoria = "SELECT categoria, COUNT(*) FROM Carros INNER JOIN Aluguéis ON Carros.id_carro = Aluguéis.id_carro GROUP BY categoria"
+
+    receitaTotal <- fromSql <$> odbcQuery conn queryReceitaTotal []
+    numeroAlugueis <- fromSql <$> odbcQuery conn queryNumeroAlugueis []
+    totalCarros <- fromSql <$> odbcQuery conn queryTotalCarros []
+    carrosMaisDefeituosos <- odbcQuery conn queryCarrosMaisDefeituosos [] >>= mapM parseCarroMaisDefeituoso
+    alugueisPorCategoria <- odbcQuery conn queryAlugueisPorCategoria [] >>= mapM parseAlugueisPorCategoria
+
+    return $ DashboardInfo receitaTotal numeroAlugueis totalCarros carrosMaisDefeituosos alugueisPorCategoria
+
+parseCarroMaisDefeituoso :: [SqlValue] -> IO (String, Int)
+parseCarroMaisDefeituoso [modeloSql, countSql] = do
+    let modelo = fromSql modeloSql
+        count = fromSql countSql
+    return (modelo, count)
+parseCarroMaisDefeituoso _ = fail "Dados inválidos para carrosMaisDefeituosos"
+
+parseAlugueisPorCategoria :: [SqlValue] -> IO (String, Int)
+parseAlugueisPorCategoria [categoriaSql, countSql] = do
+    let categoria = fromSql categoriaSql
+        count = fromSql countSql
+    return (categoria, count)
+parseAlugueisPorCategoria _ = fail "Dados inválidos para alugueisPorCategoria"
+
+-- Função para exibir o menu e obter a escolha do usuário
+exibirMenu :: IO MenuOption
+exibirMenu = do
+    putStrLn "Dashboard da Locadora de Carros:"
+    putStrLn "1. Receita Total"
+    putStrLn "2. Número de Aluguéis"
+    putStrLn "3. Total de Carros"
+    putStrLn "4. Carros Mais Defeituosos"
+    putStrLn "5. Aluguéis por Categoria"
+    putStrLn "6. Sair"
+    putStrLn "Escolha uma opção (1/2/3/4/5/6): "
+    opcao <- getLine
+
+    case opcao of
+        "1" -> return ReceitaTotal
+        "2" -> return NumeroAlugueis
+        "3" -> return TotalCarros
+        "4" -> return CarrosMaisDefeituosos
+        "5" -> return AlugueisPorCategoria
+        "6" -> return Sair
+        _   -> do
+            putStrLn "Opção inválida. Por favor, escolha uma opção válida."
+            exibirMenu
+
+-- Função para exibir informações com base na escolha do usuário
+exibirInformacoes :: DashboardInfo -> MenuOption -> IO ()
+exibirInformacoes info opcao = case opcao of
+    ReceitaTotal -> putStrLn $ "Receita Total: $" ++ show (receitaTotal info)
+    NumeroAlugueis -> putStrLn $ "Número de Aluguéis: " ++ show (numeroAlugueis info)
+    TotalCarros -> putStrLn $ "Total de Carros: " ++ show (totalCarros info)
+    CarrosMaisDefeituosos -> do
+        putStrLn "Carros Mais Defeituosos:"
+        mapM_ (\(modelo, defeitos) -> putStrLn $ "Modelo: " ++ modelo ++ ", Defeitos: " ++ show defeitos) (carrosMaisDefeituosos info)
+    AlugueisPorCategoria -> do
+        putStrLn "Aluguéis por Categoria:"
+        mapM_ (\(categoria, alugueis) -> putStrLn $ "Categoria: " ++ categoria ++ ", Número de Aluguéis: " ++ show alugueis) (alugueisPorCategoria info)
+    Sair -> putStrLn "Saindo..."
+
+main :: IO ()
+main = do
+    let connStr = "DSN=SWI-Prolog;Database=plp_app;Server=localhost;Uid=postgres;Pwd=plp123;Port=5433"
+    conn <- odbcConnect connStr
+
+    infoDashboard <- obterInformacoesDashboard conn
+    opcao <- exibirMenu
+
+    exibirInformacoes infoDashboard opcao
+
+    odbcDisconnect conn `catch` (\(SomeException e) -> putStrLn $ "Erro ao desconectar: " ++ show e)
