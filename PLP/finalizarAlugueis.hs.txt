@@ -1,0 +1,28 @@
+finalizarReparo :: Connection -> IO ()
+finalizarReparo conn = do
+    putStrLn "Nos informe o ID do carro a fim de ser finalizado o reparo:"
+    carroIdStr <- getLine
+    let carroId = read carroIdStr :: Integer
+
+    emReparo <- verificarStatusCarroEmReparo conn carroId
+
+    if emReparo
+        then do
+            putStrLn "Há algum valor a ser pago para o reparo?"
+            valorReparoStr <- getLine
+            let valorReparo = read valorReparoStr :: Double
+
+            execute conn "UPDATE Carros SET status = 'D' WHERE id_carro = ?" (Only carroId)
+
+            [Only aluguelId] <- query conn "SELECT id_aluguel FROM Alugueis WHERE id_carro = ? AND status_aluguel = 'ativo'" (Only carroId)
+
+            execute conn "UPDATE Alugueis SET valor_total = valor_total + ? WHERE id_aluguel = ?" (valorReparo, aluguelId)
+
+            execute conn "UPDATE Alugueis SET status_aluguel = 'Concluído' WHERE id_carro = ? AND status_aluguel = 'ativo'" (Only carroId)
+
+            if valorReparo > 0
+                then putStrLn "Valor do reparo computado."
+                else putStrLn "Reparo finalizado com sucesso!"
+
+        else putStrLn "O carro buscado não existe ou não está em reparo."
+
